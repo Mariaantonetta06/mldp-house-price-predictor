@@ -67,10 +67,8 @@ def get_required_raw_columns(pipeline_obj):
     Returns the list of RAW (pre-encoded) feature columns expected by the pipeline.
     Tries feature_names_in_ first; otherwise extracts from ColumnTransformer transformers_.
     """
-    # Best case: sklearn recorded the raw input columns during fit
     if hasattr(pipeline_obj, "feature_names_in_"):
         cols = list(pipeline_obj.feature_names_in_)
-        # If they look like already-one-hot-encoded names, it's the wrong artifact
         looks_encoded = any(str(c).startswith(("cat__", "num__", "remainder__")) for c in cols)
         if looks_encoded:
             raise ValueError(
@@ -79,7 +77,6 @@ def get_required_raw_columns(pipeline_obj):
             )
         return cols
 
-    # Otherwise, extract raw column selectors from the ColumnTransformer inside the pipeline
     if not hasattr(pipeline_obj, "named_steps"):
         raise ValueError("Loaded object is not a sklearn Pipeline. Please save the FULL pipeline.")
 
@@ -112,7 +109,6 @@ if error:
     st.error(error)
     st.stop()
 
-# Sanity check: must be Pipeline
 if not hasattr(model_pipeline, "named_steps"):
     st.error(
         "❌ Loaded model is not a sklearn Pipeline.\n\n"
@@ -120,7 +116,6 @@ if not hasattr(model_pipeline, "named_steps"):
     )
     st.stop()
 
-# Detect required raw columns (prevents missing-columns errors)
 try:
     REQUIRED_COLS = get_required_raw_columns(model_pipeline)
 except Exception as e:
@@ -138,7 +133,7 @@ with st.sidebar:
         "**Range shown:** ±15% (heuristic)"
     )
 
-# ==================== DEFAULTS + RESET (FIXED) ====================
+# ==================== DEFAULTS + RESET (WORKING) ====================
 DEFAULTS = {
     "quality": 6,
     "living_area": 1500,
@@ -148,18 +143,16 @@ DEFAULTS = {
     "lot": 10000,
 }
 
-def reset_defaults():
-    """
-    Proper reset: sets widget keys back to defaults.
-    This works because widgets use these keys.
-    """
-    for k, v in DEFAULTS.items():
-        st.session_state[k] = v
-
 # Initialize defaults once
 for k, v in DEFAULTS.items():
     if k not in st.session_state:
         st.session_state[k] = v
+
+# Apply reset BEFORE widgets instantiate
+if st.session_state.get("_do_reset", False):
+    for k, v in DEFAULTS.items():
+        st.session_state[k] = v
+    st.session_state["_do_reset"] = False
 
 # ==================== INPUT ====================
 st.markdown("## Enter Property Details")
@@ -167,45 +160,17 @@ st.markdown("## Enter Property Details")
 col1, col2 = st.columns(2)
 
 with col1:
-    quality = st.slider(
-        "OverallQual (Overall Quality: 1–10)",
-        1, 10,
-        key="quality"
-    )
-    living_area = st.number_input(
-        "GrLivArea (Above Ground Living Area, sq ft)",
-        300, 6000,
-        step=50,
-        key="living_area"
-    )
-    garage = st.slider(
-        "GarageCars (Garage Capacity)",
-        0, 4,
-        key="garage"
-    )
+    st.slider("OverallQual (Overall Quality: 1–10)", 1, 10, key="quality")
+    st.number_input("GrLivArea (Above Ground Living Area, sq ft)", 300, 6000, step=50, key="living_area")
+    st.slider("GarageCars (Garage Capacity)", 0, 4, key="garage")
 
 with col2:
-    basement = st.number_input(
-        "TotalBsmtSF (Total Basement Area, sq ft)",
-        0, 5000,
-        step=50,
-        key="basement"
-    )
-    year = st.slider(
-        "YearBuilt (Year Built)",
-        1900, 2025,
-        key="year"
-    )
-    lot = st.number_input(
-        "LotArea (Lot Area, sq ft)",
-        1000, 200000,
-        step=500,
-        key="lot"
-    )
+    st.number_input("TotalBsmtSF (Total Basement Area, sq ft)", 0, 5000, step=50, key="basement")
+    st.slider("YearBuilt (Year Built)", 1900, 2025, key="year")
+    st.number_input("LotArea (Lot Area, sq ft)", 1000, 200000, step=500, key="lot")
 
-# ✅ Reset button that actually works
 if st.button("Reset to defaults"):
-    reset_defaults()
+    st.session_state["_do_reset"] = True
     st.rerun()
 
 # ==================== PREDICTION ====================
@@ -213,10 +178,8 @@ st.markdown("## Get Prediction")
 
 if st.button("🔮 PREDICT PRICE", use_container_width=True):
     try:
-        # Build a FULL raw-feature row the pipeline expects (prevents missing-columns errors)
         input_row = {c: np.nan for c in REQUIRED_COLS}
 
-        # Fill only what your UI collects
         user_values = {
             "OverallQual": st.session_state["quality"],
             "GrLivArea": st.session_state["living_area"],
@@ -233,7 +196,6 @@ if st.button("🔮 PREDICT PRICE", use_container_width=True):
         input_df = pd.DataFrame([input_row], columns=REQUIRED_COLS)
 
         with st.spinner("Predicting..."):
-            # Model predicts log1p(SalePrice)
             log_price = float(model_pipeline.predict(input_df)[0])
             price = float(np.expm1(log_price))
 
