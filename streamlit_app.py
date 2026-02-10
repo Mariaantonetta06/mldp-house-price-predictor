@@ -32,7 +32,6 @@ st.markdown("""
         font-weight: bold;
         border: none;
     }
-    /* small spacing polish */
     .block-container { padding-top: 1.2rem; }
 </style>
 """, unsafe_allow_html=True)
@@ -50,7 +49,6 @@ def load_model_pipeline():
     if not os.path.exists(model_path):
         return None, "❌ Model file NOT found! (final_house_price_model.pkl)"
 
-    # Try joblib first; if not installed / fails, use pickle
     try:
         import joblib
         model_obj = joblib.load(model_path)
@@ -64,98 +62,172 @@ def load_model_pipeline():
         except Exception as e:
             return None, f"❌ Error loading model: {str(e)}"
 
-model_pipeline, error = load_model_pipeline()
+def get_required_raw_columns(pipeline_obj):
+    """
+    Returns the list of RAW (pre-encoded) feature columns expected by the pipeline.
+    Tries feature_names_in_ first; otherwise extracts from ColumnTransformer transformers_.
+    """
+    # Best case: sklearn recorded the raw input columns during fit
+    if hasattr(pipeline_obj, "feature_names_in_"):
+        cols = list(pipeline_obj.feature_names_in_)
+        # If they look like already-one-hot-encoded names, it's the wrong artifact
+        looks_encoded = any(str(c).startswith(("cat__", "num__", "remainder__")) for c in cols)
+        if looks_encoded:
+            raise ValueError(
+                "You loaded a model that expects ONE-HOT encoded columns (cat__/num__). "
+                "Re-save the FULL pipeline (preprocessor + model) as final_house_price_model.pkl."
+            )
+        return cols
 
+    # Otherwise, extract raw column selectors from the ColumnTransformer inside the pipeline
+    if not hasattr(pipeline_obj, "named_steps"):
+        raise ValueError("Loaded object is not a sklearn Pipeline. Please save the FULL pipeline.")
+
+    preprocessor = None
+    for _, step_obj in pipeline_obj.named_steps.items():
+        if "ColumnTransformer" in type(step_obj).__name__:
+            preprocessor = step_obj
+            break
+
+    if preprocessor is None or not hasattr(preprocessor, "transformers_"):
+        raise ValueError(
+            "Cannot detect required raw columns. Ensure your saved file is the FULL pipeline "
+            "(ColumnTransformer preprocessor + model)."
+        )
+
+    required = []
+    for _, _, cols in preprocessor.transformers_:
+        if cols is None or cols == "drop":
+            continue
+        # cols can be list of col names, or numpy array of names
+        if isinstance(cols, (list, tuple, np.ndarray, pd.Index)):
+            required.extend(list(cols))
+
+    required = sorted(set(required))
+    if not required:
+        raise ValueError("Detected 0 raw columns from preprocessor. Re-check how the pipeline was built/saved.")
+    return required
+
+model_pipeline, error = load_model_pipeline()
 if error:
     st.error(error)
     st.stop()
 
-# --- sanity check: ensure it's a PIPELINE (preprocess + model) ---
-# If feature names look like cat__/num__, you loaded the post-encoded model, not the pipeline.
-if hasattr(model_pipeline, "feature_names_in_"):
-    fitted_cols = list(model_pipeline.feature_names_in_)
-    looks_encoded = any(str(c).startswith(("cat__", "num__", "remainder__")) for c in fitted_cols)
-else:
-    fitted_cols = None
-    looks_encoded = False
-
-# If it’s not a sklearn Pipeline, or it looks like encoded columns, prediction will break / be wrong.
-is_pipeline = hasattr(model_pipeline, "named_steps")
-
-if (not is_pipeline) or looks_encoded:
+# Sanity check: must be Pipeline
+if not hasattr(model_pipeline, "named_steps"):
     st.error(
-        "❌ You loaded a model that expects ONE-HOT encoded feature columns (cat__/num__).\n\n"
-        "Fix: re-save the FULL sklearn Pipeline (preprocessor + model) as final_house_price_model.pkl.\n"
-        "In your notebook: joblib.dump(<your_pipeline>, 'final_house_price_model.pkl')"
+        "❌ Loaded model is not a sklearn Pipeline.\n\n"
+        "Fix: save the FULL pipeline (preprocessor + model) into final_house_price_model.pkl."
     )
+    st.stop()
+
+# Detect required raw columns (fixes 'columns are missing' issue)
+try:
+    REQUIRED_COLS = get_required_raw_columns(model_pipeline)
+except Exception as e:
+    st.error(f"❌ {str(e)}")
     st.stop()
 
 st.success("✅ Model loaded successfully!")
 
 # ==================== SIDEBAR ====================
 with st.sidebar:
-    # IMPORTANT: for regression, use R² wording (not “accuracy”).
     st.info(
         "**Model:** Random Forest\n\n"
         "**Test R²:** 0.88\n\n"
-        "**Features (raw):** 79\n\n"
+        f"**Features (raw):** {len(REQUIRED_COLS)}\n\n"
         "**Range shown:** ±15% (heuristic)"
     )
+
+# ==================== DEFAULTS + RESET (REAL RESET) ====================
+DEFAULTS = {
+    "quality": 6,
+    "living_area": 1500,
+    "garage": 2,
+    "basement": 800,
+    "year": 2000,
+    "lot": 10000,
+}
+
+# Initialize session_state once
+for k, v in DEFAULTS.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
+
+def reset_defaults():
+    for k, v in DEFAULTS.items():
+        st.session_state[k] = v
 
 # ==================== INPUT ====================
 st.markdown("## Enter Property Details")
 
-# Better, more realistic defaults (first impression matters)
-DEFAULT_QUALITY = 6
-DEFAULT_GRLIVAREA = 1500
-DEFAULT_GARAGECARS = 2
-DEFAULT_BSMT = 800
-DEFAULT_YEARBUILT = 2000
-DEFAULT_LOTAREA = 10000
-
 col1, col2 = st.columns(2)
 
 with col1:
-    # Use dataset-style naming for professionalism
-    quality = st.slider("OverallQual (Overall Quality: 1–10)", 1, 10, DEFAULT_QUALITY)
-    living_area = st.number_input("GrLivArea (Above Ground Living Area, sq ft)", 300, 6000, DEFAULT_GRLIVAREA, 50)
-    garage = st.slider("GarageCars (Garage Capacity)", 0, 4, DEFAULT_GARAGECARS)
+    st.session_state["quality"] = st.slider(
+        "OverallQual (Overall Quality: 1–10)",
+        1, 10,
+        value=int(st.session_state["quality"])
+    )
+    st.session_state["living_area"] = st.number_input(
+        "GrLivArea (Above Ground Living Area, sq ft)",
+        300, 6000,
+        value=int(st.session_state["living_area"]),
+        step=50
+    )
+    st.session_state["garage"] = st.slider(
+        "GarageCars (Garage Capacity)",
+        0, 4,
+        value=int(st.session_state["garage"])
+    )
 
 with col2:
-    basement = st.number_input("TotalBsmtSF (Total Basement Area, sq ft)", 0, 5000, DEFAULT_BSMT, 50)
-    year = st.slider("YearBuilt (Year Built)", 1900, 2025, DEFAULT_YEARBUILT)
-    lot = st.number_input("LotArea (Lot Area, sq ft)", 1000, 200000, DEFAULT_LOTAREA, 500)
+    st.session_state["basement"] = st.number_input(
+        "TotalBsmtSF (Total Basement Area, sq ft)",
+        0, 5000,
+        value=int(st.session_state["basement"]),
+        step=50
+    )
+    st.session_state["year"] = st.slider(
+        "YearBuilt (Year Built)",
+        1900, 2025,
+        value=int(st.session_state["year"])
+    )
+    st.session_state["lot"] = st.number_input(
+        "LotArea (Lot Area, sq ft)",
+        1000, 200000,
+        value=int(st.session_state["lot"]),
+        step=500
+    )
 
-# Quick reset (nice UX, minimal change)
-if st.button("Reset to defaults"):
-    st.rerun()
+st.button("Reset to defaults", on_click=reset_defaults)
 
 # ==================== PREDICTION ====================
 st.markdown("## Get Prediction")
 
 if st.button("🔮 PREDICT PRICE", use_container_width=True):
     try:
-        # Build a FULL raw-feature row the pipeline was trained on
-        # (Fill everything else with NaN so your imputers handle it)
-        raw_cols = list(model_pipeline.feature_names_in_)
-        input_row = {c: np.nan for c in raw_cols}
+        # Build a FULL raw-feature row the pipeline expects (prevents missing-columns errors)
+        input_row = {c: np.nan for c in REQUIRED_COLS}
 
-        # Fill in user-selected fields (only if they exist in training cols)
-        for k, v in {
-            "OverallQual": quality,
-            "GrLivArea": living_area,
-            "GarageCars": garage,
-            "TotalBsmtSF": basement,
-            "YearBuilt": year,
-            "LotArea": lot
-        }.items():
+        # Fill only what your UI collects
+        user_values = {
+            "OverallQual": st.session_state["quality"],
+            "GrLivArea": st.session_state["living_area"],
+            "GarageCars": st.session_state["garage"],
+            "TotalBsmtSF": st.session_state["basement"],
+            "YearBuilt": st.session_state["year"],
+            "LotArea": st.session_state["lot"],
+        }
+
+        for k, v in user_values.items():
             if k in input_row:
                 input_row[k] = v
 
-        input_df = pd.DataFrame([input_row], columns=raw_cols)
+        input_df = pd.DataFrame([input_row], columns=REQUIRED_COLS)
 
         with st.spinner("Predicting..."):
-            # Your model predicts log1p(SalePrice)
+            # Model predicts log1p(SalePrice)
             log_price = float(model_pipeline.predict(input_df)[0])
             price = float(np.expm1(log_price))
 
@@ -166,13 +238,18 @@ if st.button("🔮 PREDICT PRICE", use_container_width=True):
         c2.metric("Estimated Range (±15%)", f"${price*0.85:,.0f} - ${price*1.15:,.0f}")
         c3.metric("Test R²", "0.88")
 
-        # Summary (keep your layout)
         st.dataframe(pd.DataFrame({
             "Feature": ["OverallQual", "GrLivArea", "GarageCars", "TotalBsmtSF", "YearBuilt", "LotArea"],
-            "Value": [f"{quality}/10", f"{living_area:,}", f"{garage}", f"{basement:,}", f"{year}", f"{lot:,}"]
+            "Value": [
+                f'{st.session_state["quality"]}/10',
+                f'{st.session_state["living_area"]:,}',
+                f'{st.session_state["garage"]}',
+                f'{st.session_state["basement"]:,}',
+                f'{st.session_state["year"]}',
+                f'{st.session_state["lot"]:,}'
+            ]
         }), use_container_width=True, hide_index=True)
 
-        # Category (keep your logic)
         if price > 300000:
             st.success(f"🏆 Premium Property - ${price:,.0f}")
         elif price > 200000:
@@ -182,12 +259,13 @@ if st.button("🔮 PREDICT PRICE", use_container_width=True):
         else:
             st.info(f"💰 Budget Friendly - ${price:,.0f}")
 
-        # Optional: show prediction details without cluttering main UI
         with st.expander("See prediction details"):
             st.write(f"Predicted log1p(SalePrice): {log_price:.4f}")
             st.write("Note: Price is converted back using expm1().")
 
     except Exception as e:
+        # If you see: SimpleImputer has no attribute _fill_dtype
+        # it usually means sklearn version mismatch between training vs Streamlit Cloud runtime.
         st.error(f"❌ Error: {str(e)}")
 
 st.divider()
