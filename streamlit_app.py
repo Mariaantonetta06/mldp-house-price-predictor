@@ -99,7 +99,6 @@ def get_required_raw_columns(pipeline_obj):
     for _, _, cols in preprocessor.transformers_:
         if cols is None or cols == "drop":
             continue
-        # cols can be list of col names, or numpy array of names
         if isinstance(cols, (list, tuple, np.ndarray, pd.Index)):
             required.extend(list(cols))
 
@@ -121,7 +120,7 @@ if not hasattr(model_pipeline, "named_steps"):
     )
     st.stop()
 
-# Detect required raw columns (fixes 'columns are missing' issue)
+# Detect required raw columns (prevents missing-columns errors)
 try:
     REQUIRED_COLS = get_required_raw_columns(model_pipeline)
 except Exception as e:
@@ -139,7 +138,7 @@ with st.sidebar:
         "**Range shown:** ±15% (heuristic)"
     )
 
-# ==================== DEFAULTS + RESET (REAL RESET) ====================
+# ==================== DEFAULTS + RESET (FIXED) ====================
 DEFAULTS = {
     "quality": 6,
     "living_area": 1500,
@@ -149,13 +148,17 @@ DEFAULTS = {
     "lot": 10000,
 }
 
-# Initialize session_state once
-for k, v in DEFAULTS.items():
-    if k not in st.session_state:
+def reset_defaults():
+    """
+    Proper reset: sets widget keys back to defaults.
+    This works because widgets use these keys.
+    """
+    for k, v in DEFAULTS.items():
         st.session_state[k] = v
 
-def reset_defaults():
-    for k, v in DEFAULTS.items():
+# Initialize defaults once
+for k, v in DEFAULTS.items():
+    if k not in st.session_state:
         st.session_state[k] = v
 
 # ==================== INPUT ====================
@@ -164,43 +167,46 @@ st.markdown("## Enter Property Details")
 col1, col2 = st.columns(2)
 
 with col1:
-    st.session_state["quality"] = st.slider(
+    quality = st.slider(
         "OverallQual (Overall Quality: 1–10)",
         1, 10,
-        value=int(st.session_state["quality"])
+        key="quality"
     )
-    st.session_state["living_area"] = st.number_input(
+    living_area = st.number_input(
         "GrLivArea (Above Ground Living Area, sq ft)",
         300, 6000,
-        value=int(st.session_state["living_area"]),
-        step=50
+        step=50,
+        key="living_area"
     )
-    st.session_state["garage"] = st.slider(
+    garage = st.slider(
         "GarageCars (Garage Capacity)",
         0, 4,
-        value=int(st.session_state["garage"])
+        key="garage"
     )
 
 with col2:
-    st.session_state["basement"] = st.number_input(
+    basement = st.number_input(
         "TotalBsmtSF (Total Basement Area, sq ft)",
         0, 5000,
-        value=int(st.session_state["basement"]),
-        step=50
+        step=50,
+        key="basement"
     )
-    st.session_state["year"] = st.slider(
+    year = st.slider(
         "YearBuilt (Year Built)",
         1900, 2025,
-        value=int(st.session_state["year"])
+        key="year"
     )
-    st.session_state["lot"] = st.number_input(
+    lot = st.number_input(
         "LotArea (Lot Area, sq ft)",
         1000, 200000,
-        value=int(st.session_state["lot"]),
-        step=500
+        step=500,
+        key="lot"
     )
 
-st.button("Reset to defaults", on_click=reset_defaults)
+# ✅ Reset button that actually works
+if st.button("Reset to defaults"):
+    reset_defaults()
+    st.rerun()
 
 # ==================== PREDICTION ====================
 st.markdown("## Get Prediction")
@@ -264,8 +270,6 @@ if st.button("🔮 PREDICT PRICE", use_container_width=True):
             st.write("Note: Price is converted back using expm1().")
 
     except Exception as e:
-        # If you see: SimpleImputer has no attribute _fill_dtype
-        # it usually means sklearn version mismatch between training vs Streamlit Cloud runtime.
         st.error(f"❌ Error: {str(e)}")
 
 st.divider()
