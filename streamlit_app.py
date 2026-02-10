@@ -202,9 +202,9 @@ if st.button("🔮 PREDICT PRICE", use_container_width=True):
         st.success("✅ Prediction Complete!")
 
         c1, c2, c3 = st.columns(3)
-        c1.metric("Estimated Price (USD)", f"${price:,.0f}")
-        c2.metric("Estimated Range (±15%)", f"${price*0.85:,.0f} - ${price*1.15:,.0f}")
-        c3.metric("Test R²", "0.88")
+        c1.metric("Estimated Price (USD)", f"${price:,.0f}", delta=f"±${price*0.15:,.0f} (±15% confidence)")
+        c2.metric("Price (2 decimals)", f"${price:,.2f}", delta=f"Log value: {log_price:.4f}")
+        c3.metric("Test R²", "0.88", delta="Trained: 1,460 houses")
 
         st.dataframe(pd.DataFrame({
             "Feature": ["OverallQual", "GrLivArea", "GarageCars", "TotalBsmtSF", "YearBuilt", "LotArea"],

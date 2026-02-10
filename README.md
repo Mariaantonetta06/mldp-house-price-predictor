@@ -23,3 +23,36 @@ It demonstrates the end-to-end machine learning workflow, including data preproc
 - Predictions are converted back using `expm1` for interpretability.
 
 A full **scikit-learn Pipeline** (preprocessing + model) is saved as:
+
+---
+
+## 🚀 Installation & Running Locally
+
+### Requirements
+- Python 3.8+
+- Dependencies: see `requirements.txt`
+
+### Setup
+```bash
+git clone https://github.com/yourusername/mldp-house-price-predictor
+cd mldp-house-price-predictor
+pip install -r requirements.txt
+```
+
+### Run Locally
+```bash
+streamlit run streamlit_app.py
+```
+
+The app will open at `http://localhost:8501`
+
+---
+
+## 🌐 Live Deployment
+
+**Deployed on Streamlit Cloud:**
+(https://mldp-house-price-predictor-9c2bxzwctajhqbqgkuan6j.streamlit.app/)
+
+---
+
+## 📊 Project Structure
